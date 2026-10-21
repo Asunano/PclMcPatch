@@ -4,6 +4,7 @@ obj/
 
 # 发布输出
 publish/
+publish-full/
 
 # 备份与临时文件（工具运行时生成）
 *.bak

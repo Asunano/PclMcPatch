@@ -25,7 +25,8 @@ jobs:
       - name: Restore
         run: dotnet restore src/PclMcPatch.csproj
 
-      - name: Publish (win-x64, single-file, framework-dependent)
+      # 精简版：框架依赖单文件，体积小；目标机需已安装 .NET 8 桌面运行时。
+      - name: Publish — 精简版（framework-dependent）
         run: >
           dotnet publish src/PclMcPatch.csproj
           -c Release
@@ -35,29 +36,66 @@ jobs:
           -p:PublishTrimmed=false
           -o ./publish
 
+      # 完整版：自包含单文件，内置 .NET 8 运行时，目标机无需任何运行时；体积较大。
+      - name: Publish — 完整版（self-contained）
+        run: >
+          dotnet publish src/PclMcPatch.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:PublishTrimmed=false
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o ./publish-full
+
       - name: Package artifacts into zip
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}"
           if ($version -like 'v*') { $version = $version.Substring(1) }
-          $zip = "PclMcPatch-$version.zip"
-          Compress-Archive -Path ./publish/PclMcPatch.exe, ./README.md -DestinationPath $zip -Force
-          echo "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          $slim = "PclMcPatch-$version.zip"
+          $full = "PclMcPatch-$version-full.zip"
+
+          Compress-Archive -Path ./publish/PclMcPatch.exe, ./README.md -DestinationPath $slim -Force
+          Compress-Archive -Path ./publish-full/PclMcPatch.exe, ./README.md -DestinationPath $full -Force
+
+          "ZIP_SLIM=$slim" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ZIP_FULL=$full" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Get-ChildItem $slim, $full |
+            Select-Object Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 1) } } |
+            Format-Table |
+            Out-String |
+            Write-Host
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ZIP_NAME }}
+          files: |
+            ${{ env.ZIP_SLIM }}
+            ${{ env.ZIP_FULL }}
           name: PclMcPatch ${{ github.ref_name }}
           body: |
             ## PCL2 我的世界本体下载 · 一键补丁 / 启动器外壳
+
+            ### 下载哪个？
+
+            | 附件 | 说明 | 适用 |
+            |------|------|------|
+            | `${{ env.ZIP_SLIM }}` | 精简版：单文件，体积小 | 已装 .NET 8 桌面运行时（PCL2 本身就需要，多数人已具备） |
+            | `${{ env.ZIP_FULL }}` | 完整版：单文件，**内置 .NET 8 运行时** | 没有任何 .NET 环境，或精简版提示缺少运行时 |
+
+            两者功能完全一致，只是打包方式不同；任选其一解压即用。
 
             ### 用法
             - **启动器模式**：把 `PclMcPatch.exe` 放到 PCL2 主程序同目录，双击它即可（自动补丁 + 启动 PCL2）。
             - **手动模式**：把 PCL2 主程序拖到 `PclMcPatch.exe` 上。
 
             ### 校验
-            - 单文件、框架依赖（需 .NET 8 桌面运行时，PCL2 本身已需要）。
+            - 单文件、双击即用；完整版体积较大是因为把运行时一起打包了。
             - 自动备份原文件为 `*.bak`，已补丁版本重复运行安全跳过。
+            - 启动时后台检查新版（不阻塞启动），可用 `--no-update-check` 关闭。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

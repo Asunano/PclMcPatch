@@ -15,6 +15,7 @@
 - **多版本兼容**：精确特征匹配为主，匹配不到时回退到宽松策略；两者都不匹配则安全跳过并提示，绝不乱改文件。
 - **安全可回退**：写回前校验产物、同卷原子替换；首次补丁自动备份为 `*.exe.bak`。
 - **幂等**：已补丁的文件重复运行不会损坏。
+- **两种分发**：精简版（框架依赖，约 1.3 MB）与完整版（自包含，内置 .NET 8 运行时），按机器环境任选。
 - **更新提示**：启动时**在后台**对比 GitHub Release 的版本号，有新版本会提示并可一键打开下载页；检测不阻塞补丁与启动，失败静默跳过。
 
 ---
@@ -75,17 +76,23 @@
 
 ### 构建 / 发布
 
+发布两个变体，功能完全一致，只是打包方式不同：
+
 ```powershell
 # 仅编译（开发 / 自测）
 dotnet build -c Release
 
-# 发布单文件 exe（推荐分发方式，约 1.3 MB，无需安装运行时）
+# 精简版：框架依赖单文件（约 1.3 MB，需目标机已装 .NET 8 桌面运行时）
 dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o ./publish
+
+# 完整版：自包含单文件（内置 .NET 8 运行时，体积数十 MB，目标机无需任何运行时）
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o ./publish-full
 ```
 
-产物：`publish/PclMcPatch.exe`（单文件，双击即用）。
+产物均为单文件 `PclMcPatch.exe`（`publish/` 和 `publish-full/`），双击即用。
 
-> 依赖框架版（本仓库默认）需要目标机器已安装 **.NET 8 桌面运行时**——而 PCL2 本身就需要它，因此用户的电脑通常已经具备。
+> 精简版需要目标机器已安装 **.NET 8 桌面运行时**——PCL2 本身就需要它，因此多数用户已具备；若目标机器没有任何 .NET 环境，直接用**完整版**。
 
 ---
 
@@ -98,7 +105,7 @@ PclMcPatch-Repo/
 ├── .gitignore                    # 忽略 bin/obj/发布产物
 ├── .github/
 │   └── workflows/
-│       └── release.yml           # 推 v* tag 时构建并发布 Release
+│       └── release.yml           # 推 v* tag 时构建精简版 / 完整版并发布 Release
 ├── docs/
 │   └── PATCHING.md               # 补丁特征与版本适配（维护者向文档）
 └── src/
@@ -127,5 +134,12 @@ PclMcPatch-Repo/
 
 ### 下载已构建版本
 
-前往本仓库 **[Releases](https://github.com/Asunano/PclMcPatch/releases)** 页面，下载最新版本的 `PclMcPatch-vX.Y.Z.zip`（内含 `PclMcPatch.exe` 与说明），解压即用。
+前往本仓库 **[Releases](https://github.com/Asunano/PclMcPatch/releases)** 页面，每次发版提供两个附件（内含 `PclMcPatch.exe` 与说明，解压即用）：
+
+| 附件 | 说明 | 适用场景 |
+|------|------|----------|
+| `PclMcPatch-vX.Y.Z.zip` | **精简版**：框架依赖，单文件约 1.3 MB | 已安装 .NET 8 桌面运行时（PCL2 本身就需要，多数人已具备） |
+| `PclMcPatch-vX.Y.Z-full.zip` | **完整版**：自包含，内置 .NET 8 运行时，体积数十 MB | 电脑没有任何 .NET 环境，或精简版启动报「缺少运行时 / You must install .NET」 |
+
+两者功能完全一致，只是打包方式不同，**任选其一**即可；不确定就下 `-full`。
 

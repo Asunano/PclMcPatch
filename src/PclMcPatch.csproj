@@ -15,6 +15,8 @@
 
     <!-- 单文件发布：双击即用，无需安装 -->
     <PublishSingleFile>true</PublishSingleFile>
+    <!-- 精简版（默认）：框架依赖，需目标机有 .NET 8 运行时。
+         发布「完整版」时由 .github/workflows/release.yml 传入 --self-contained true 覆盖此项。 -->
     <SelfContained>false</SelfContained>
     <!-- 不依赖系统 ICU 库，精简环境/无全球化包时仍可运行（对 Windows 发布无害） -->
     <InvariantGlobalization>true</InvariantGlobalization>

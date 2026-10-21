@@ -134,6 +134,7 @@ callvirt set_Visibility(...)
 | Tag 形如 `vX.Y.Z` | `release.yml` 在推 `v*` tag 时构建；`v` 前缀会被忽略 |
 | 版本号只递增 | 比较是 `System.Version` 语义，`1.2.0 > 1.10.0` 之类错误靠规范避免 |
 | `.csproj` 的 `<Version>` 与 tag 一致 | 否则用户会一直被提示更新，或永远收不到提示 |
+| 两个变体共用同一 tag | `release.yml` 一次产出 `PclMcPatch-vX.Y.Z.zip`（框架依赖）与 `PclMcPatch-vX.Y.Z-full.zip`（自包含，内置运行时）；更新检测只比对 tag，与下载哪个变体无关 |
 | 预发布不参与 | API 取的是 `latest`，`prerelease` 不会触发提示 |
 
 检测失败（断网、限流、404）一律静默；`--no-update-check` / `-nu` 可跳过；`--version` / `-v` 只打印当前版本。
