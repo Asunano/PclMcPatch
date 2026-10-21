@@ -1,0 +1,23 @@
+# 构建产物
+bin/
+obj/
+
+# 发布输出
+publish/
+
+# 备份与临时文件（工具运行时生成）
+*.bak
+*.patched.tmp
+
+# 本地手工打包产物（Release 由 GitHub Actions 自动生成）
+PclMcPatch-v*.zip
+
+# 用户拖入的待补丁文件（不应入库）
+*.exe
+
+# IDE / 系统
+.vs/
+.idea/
+*.user
+Thumbs.db
+.DS_Store

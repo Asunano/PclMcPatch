@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PclMcPatch</AssemblyName>
+    <RootNamespace>PclMcPatch</RootNamespace>
+
+    <!-- 运行时标识符在发布时通过命令行指定（-r win-x64），此处不锁定，
+         以便源码仓库可在任意平台编译/自测。 -->
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!-- 单文件发布：双击即用，无需安装 -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <!-- 不依赖系统 ICU 库，精简环境/无全球化包时仍可运行（对 Windows 发布无害） -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <AssemblyTitle>PCL2 我的世界本体下载 · 一键补丁 / 启动器外壳</AssemblyTitle>
+    <Product>PCL2-McDownload-Patcher</Product>
+    <Description>为 PCL2 启动器恢复「原版游戏」下载功能的一键补丁工具，同时可作为启动器外壳在每次启动时自动注入。</Description>
+    <Version>1.0.0</Version>
+    <Authors>PCL2-McDownload-Patcher contributors</Authors>
+    <Copyright>Copyright © 2026 the contributors.</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Asunano/PclMcPatch</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Asunano/PclMcPatch</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="dnlib" Version="4.5.0" />
+  </ItemGroup>
+
+</Project>
