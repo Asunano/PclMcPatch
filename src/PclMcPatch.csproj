@@ -24,7 +24,7 @@
     <AssemblyTitle>PCL2 我的世界本体下载 · 一键补丁 / 启动器外壳</AssemblyTitle>
     <Product>PCL2-McDownload-Patcher</Product>
     <Description>为 PCL2 启动器恢复「原版游戏」下载功能的一键补丁工具，同时可作为启动器外壳在每次启动时自动注入。</Description>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Authors>PCL2-McDownload-Patcher contributors</Authors>
     <Copyright>Copyright © 2026 the contributors.</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

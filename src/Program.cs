@@ -472,8 +472,14 @@ namespace PclMcPatch
 
             bool patchedLoader = PatchMcDownloadLoader(module);
             bool patchedCard = PatchMcCardVisibility(module);
+            bool patchedDownloadLeft = PatchDownloadLeftEntries(module);
+            bool patchedEmptyDownload = PatchEmptyListDownloadButton(module);
+            bool patchedLaunchDownload = PatchLaunchDownloadState(module);
+            bool patchedModPackButton = PatchResourceModPackButton(module);
+            bool patchedInstanceDownload = PatchInstanceDownloadButton(module);
 
-            if (!patchedLoader && !patchedCard)
+            if (!patchedLoader && !patchedCard && !patchedDownloadLeft && !patchedEmptyDownload
+                && !patchedLaunchDownload && !patchedModPackButton && !patchedInstanceDownload)
             {
                 Console.WriteLine("[提示] 未检测到需要修改的特征，文件可能已补丁过、不是 PCL2，或版本过新暂不支持。");
                 Console.WriteLine("        若确实是新版 PCL2 且本体下载仍被禁用，请把版本号反馈给作者更新特征。");
@@ -517,6 +523,31 @@ namespace PclMcPatch
                 if (patchedCard)
                 {
                     Console.WriteLine("[补丁B] 已恢复修改页「我的世界」卡片显示。");
+                }
+
+                if (patchedDownloadLeft)
+                {
+                    Console.WriteLine("[补丁C] 已恢复下载页左侧「原版游戏」入口与「社区资源」标题。");
+                }
+
+                if (patchedEmptyDownload)
+                {
+                    Console.WriteLine("[补丁D1] 已恢复版本列表为空时的「下载游戏」引导按钮。");
+                }
+
+                if (patchedLaunchDownload)
+                {
+                    Console.WriteLine("[补丁D2] 已恢复启动页无版本时的「下载游戏」按钮状态。");
+                }
+
+                if (patchedModPackButton)
+                {
+                    Console.WriteLine("[补丁D3] 已恢复资源页「安装已有整合包」按钮（整合包类型下显示）。");
+                }
+
+                if (patchedInstanceDownload)
+                {
+                    Console.WriteLine("[补丁D4] 已恢复版本设置「转到下载页面」按钮。");
                 }
 
                 Console.WriteLine("[完成] 已写入补丁。");
@@ -694,7 +725,8 @@ namespace PclMcPatch
         /// <summary>
         /// 补丁 B：在 <c>PCL.PageDownloadModify.LoadInstanceFinished</c> 中，
         /// 将 <c>CardMinecraft.Visibility = Collapsed</c> 改为 <c>Visible</c>
-        /// （即把紧随 <c>get_CardMinecraft</c> 之后、传给 <c>set_Visibility</c> 的 <c>ldc.i4.2</c> 改为 <c>ldc.i4.0</c>）。
+        /// （即把紧随 <c>CardMinecraft</c> 字段/属性访问之后、传给 <c>set_Visibility</c> 的
+        /// <c>ldc.i4.2</c> 改为 <c>ldc.i4.0</c>）。
         /// </summary>
         /// <returns>是否执行了修改。</returns>
         private static bool PatchMcCardVisibility(ModuleDefMD module)
@@ -725,8 +757,12 @@ namespace PclMcPatch
                 if (isSetVisibility && isCollapsed && i >= 1)
                 {
                     Instruction prev = instructions[i - 1];
-                    if (prev.OpCode == OpCodes.Callvirt
-                        && (prev.Operand as IMethod)?.FullName.Contains("get_CardMinecraft") == true)
+                    bool isCardAccess = (prev.OpCode == OpCodes.Ldfld
+                            && (prev.Operand as IField)?.Name == "CardMinecraft")
+                        || (prev.OpCode == OpCodes.Callvirt
+                            && (prev.Operand as IMethod)?.Name == "get_CardMinecraft");
+
+                    if (isCardAccess)
                     {
                         current.OpCode = OpCodes.Ldc_I4_0;
                         return true;
@@ -739,7 +775,538 @@ namespace PclMcPatch
 
         #endregion
 
+        #region 补丁 C–D4：恢复 2.99.0.1 新增隐藏的下载入口
+
+        /*
+         * 2.99.0.1 在 2.99.0.0 的基础上，把更多下载入口也接到了 RestrictMcDownload 上。
+         * 由于该常量是编译期 Const True，这些判断在编译产物里都被折叠成了「永远隐藏」，
+         * 因此需要在 IL 层把折叠后的可见性/状态常量改回来。
+         *
+         * 每处补丁都以「类型名 + 方法名 + 字段名 + 紧跟的常量 + setter 名」为特征：
+         *  - 2.99.0.0 里这些位置是带分支的正常逻辑，不会命中；
+         *  - 补丁后再运行也不会命中（常量已改，结构不再是折叠形态），因此幂等。
+         */
+
+        /// <summary>
+        /// 补丁 C：恢复下载页左侧的「原版游戏」入口与「社区资源」标题。
+        /// <para>
+        /// 2.99.0.1 的 <c>PageDownloadLeft.New()</c> 在 <c>InitializeComponent</c> 之后把
+        /// <c>ItemInstall</c> / <c>LabResource</c> 置为 Collapsed，并把默认子页面切到 Mod。
+        /// 这里把两处可见性与默认页/勾选状态改回 2.99.0.0 的行为。
+        /// </para>
+        /// </summary>
+        /// <returns>是否执行了修改。</returns>
+        private static bool PatchDownloadLeftEntries(ModuleDefMD module)
+        {
+            TypeDef? leftPage = FindType(module, "PCL.PageDownloadLeft");
+            MethodDef? ctor = leftPage?.Methods
+                .FirstOrDefault(m => m.IsConstructor && !m.IsStatic && m.Body != null);
+            if (ctor == null)
+            {
+                return false;
+            }
+
+            IList<Instruction> instructions = ctor.Body!.Instructions;
+
+            bool patchedInstall = TrySetFieldVisibility(instructions, "ItemInstall", 2, 0);
+            bool patchedResource = TrySetFieldVisibility(instructions, "LabResource", 2, 0);
+            if (!patchedInstall && !patchedResource)
+            {
+                return false;
+            }
+
+            // 默认子页面：DownloadMod(2) -> DownloadInstall(0)
+            TrySetFieldInt32(instructions, "PageID", 2, 0);
+            // 勾选状态：ItemMod.Checked = False，让 XAML 里默认勾选的 ItemInstall 保持选中
+            TrySetFieldBoolean(instructions, "ItemMod", "set_Checked", 1, 0);
+
+            return true;
+        }
+
+        /// <summary>
+        /// 补丁 D1：恢复版本列表为空时卡片上的「下载游戏」引导按钮。
+        /// <para>
+        /// 2.99.0.1 把 <c>PageSelectRight.McInstanceListUI</c> 里的可见性判断折叠为
+        /// <c>BtnEmptyDownload.Visibility = Collapsed</c>。以同一分支里的提示文案
+        /// 「未找到任何版本的游戏」为锚点，只改这一处，不影响查看隐藏版本时隐藏按钮的逻辑。
+        /// </para>
+        /// </summary>
+        /// <returns>是否执行了修改。</returns>
+        private static bool PatchEmptyListDownloadButton(ModuleDefMD module)
+        {
+            TypeDef? selectRight = FindType(module, "PCL.PageSelectRight");
+            MethodDef? listUi = selectRight?.Methods
+                .FirstOrDefault(m => m.Name == "McInstanceListUI" && m.Body != null);
+            if (listUi == null)
+            {
+                return false;
+            }
+
+            IList<Instruction> instructions = listUi.Body!.Instructions;
+            int anchor = FindLdstrContains(instructions, "未找到任何版本的游戏");
+            if (anchor < 0)
+            {
+                return false;
+            }
+
+            int limit = Math.Min(instructions.Count - 3, anchor + 40);
+            for (int i = anchor + 1; i <= limit; i++)
+            {
+                if (instructions[i].OpCode == OpCodes.Ldfld
+                    && (instructions[i].Operand as IField)?.Name == "BtnEmptyDownload"
+                    && IsLdcI4(instructions[i + 1], 2)
+                    && IsSetVisibility(instructions[i + 2]))
+                {
+                    SetLdcI4(instructions[i + 1], 0);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 补丁 D2：恢复启动页在「没有可用版本」时的下载入口。
+        /// <para>
+        /// 2.99.0.1 的 <c>PageLaunchLeft.RefreshButtonsUI</c> 把
+        /// <c>If RestrictMcDownload OrElse (UI 隐藏设置) Then CurrentState = 1 Else CurrentState = 2</c>
+        /// 折叠为恒等于 1（启动按钮显示「启动游戏」但不可点击）。
+        /// 这里把该分支的状态常量改为 2，恢复「下载游戏」按钮。
+        /// </para>
+        /// <para>
+        /// 说明：2.99.0.0 的原始逻辑还会检查「隐藏下载页面」设置；本补丁直接恢复为可下载状态，
+        /// 与该设置无关。
+        /// </para>
+        /// </summary>
+        /// <returns>是否执行了修改。</returns>
+        private static bool PatchLaunchDownloadState(ModuleDefMD module)
+        {
+            TypeDef? launchLeft = FindType(module, "PCL.PageLaunchLeft");
+            MethodDef? refresh = launchLeft?.Methods
+                .FirstOrDefault(m => m.Name == "RefreshButtonsUI" && m.Body != null);
+            if (refresh == null)
+            {
+                return false;
+            }
+
+            IList<Instruction> instructions = refresh.Body!.Instructions;
+
+            // 折叠后的形态：ldc.i4.1; stloc CurrentState; br; ldc.i4.3; stloc CurrentState
+            // （1 = 下载已禁用，3 = 已选中版本；2 = 无版本但可下载，在 2.99.0.1 中被折叠删除）
+            int match = -1;
+            for (int i = 0; i + 3 < instructions.Count; i++)
+            {
+                if (!IsLdcI4(instructions[i], 1))
+                {
+                    continue;
+                }
+
+                int stateLocal = GetStlocIndex(instructions[i + 1]);
+                if (stateLocal < 0)
+                {
+                    continue;
+                }
+
+                int j = i + 2;
+                if (IsUnconditionalBranch(instructions[j]))
+                {
+                    j++;
+                }
+
+                if (j + 1 < instructions.Count
+                    && IsLdcI4(instructions[j], 3)
+                    && GetStlocIndex(instructions[j + 1]) == stateLocal)
+                {
+                    // 多个候选说明结构与预期不符，保守跳过
+                    if (match >= 0)
+                    {
+                        return false;
+                    }
+
+                    match = i;
+                }
+            }
+
+            if (match < 0)
+            {
+                return false;
+            }
+
+            SetLdcI4(instructions[match], 2);
+            return true;
+        }
+
+        /// <summary>
+        /// 补丁 D3：恢复资源页「安装已有整合包」按钮。
+        /// <para>
+        /// 2.99.0.1 把 <c>PageResource.PageType</c> 的 setter 里
+        /// <c>If(Value = ResourceTypes.ModPack AndAlso Not RestrictMcDownload, Visible, Collapsed)</c>
+        /// 折叠为恒 <c>Collapsed</c>。这里在 setter 中重新插入
+        /// <c>Value = ResourceTypes.ModPack</c> 的判断。
+        /// </para>
+        /// </summary>
+        /// <returns>是否执行了修改。</returns>
+        private static bool PatchResourceModPackButton(ModuleDefMD module)
+        {
+            TypeDef? resourcePage = FindType(module, "PCL.PageResource");
+            MethodDef? setter = resourcePage?.Methods
+                .FirstOrDefault(m => m.Name == "set_PageType" && m.Body != null);
+            if (setter == null || setter.Parameters.Count < 1)
+            {
+                return false;
+            }
+
+            IList<Instruction> instructions = setter.Body!.Instructions;
+            for (int i = 0; i + 2 < instructions.Count; i++)
+            {
+                if (instructions[i].OpCode != OpCodes.Ldfld
+                    || (instructions[i].Operand as IField)?.Name != "BtnSearchInstallModPack")
+                {
+                    continue;
+                }
+
+                // 在 ldfld 之后、set_Visibility 之前，VB 可能留下对已折叠条件的求值残渣
+                // （典型为 ldarg.1 / ldc.i4.2 / pop / pop），只允许无副作用、栈净变化为 0 的指令。
+                int setterIdx = -1;
+                for (int j = i + 1; j < Math.Min(instructions.Count, i + 12); j++)
+                {
+                    if (IsSetVisibility(instructions[j]))
+                    {
+                        setterIdx = j;
+                        break;
+                    }
+
+                    if (!IsFoldedExpressionNoise(instructions[j]))
+                    {
+                        break;
+                    }
+                }
+
+                if (setterIdx < 0 || setterIdx - 1 <= i)
+                {
+                    continue;
+                }
+
+                Instruction collapsed = instructions[setterIdx - 1];
+                Instruction after = instructions[setterIdx];
+                if (!IsLdcI4(collapsed, 2))
+                {
+                    continue;
+                }
+
+                // 删掉折叠残渣，保留最终的 ldc.i4.2 作为「不是整合包」分支
+                for (int j = setterIdx - 2; j >= i + 1; j--)
+                {
+                    instructions.RemoveAt(j);
+                }
+
+                int insertAt = instructions.IndexOf(collapsed);
+                if (insertAt < 0)
+                {
+                    return false;
+                }
+                // 依次插入（每次都插在同一位置，最终顺序为 ldarg.1 / 2 / bne.un / 0 / br）
+                instructions.Insert(insertAt, new Instruction(OpCodes.Br, after));
+                instructions.Insert(insertAt, new Instruction(OpCodes.Ldc_I4_0));
+                instructions.Insert(insertAt, new Instruction(OpCodes.Bne_Un, collapsed));
+                instructions.Insert(insertAt, new Instruction(OpCodes.Ldc_I4_2));
+                instructions.Insert(insertAt, new Instruction(OpCodes.Ldarg_1));
+
+                // 插入后栈深最多 3（对象 + 两个比较值），让 dnlib 重新计算 maxstack
+                setter.Body.KeepOldMaxStack = false;
+                setter.Body.UpdateInstructionOffsets();
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 补丁 D4：恢复版本设置页（无 Mod 加载器时）的「转到下载页面」按钮。
+        /// <para>
+        /// 2.99.0.1 的 <c>PageInstanceModDisabled.BtnDownload_Loaded</c> 把
+        /// <c>BtnDownload.Visibility</c> 的计算折叠为恒 <c>Collapsed</c>。
+        /// 这里把赋给局部变量的常量改为 <c>Visible</c>。
+        /// </para>
+        /// </summary>
+        /// <returns>是否执行了修改。</returns>
+        private static bool PatchInstanceDownloadButton(ModuleDefMD module)
+        {
+            TypeDef? modDisabled = FindType(module, "PCL.PageInstanceModDisabled");
+            MethodDef? loaded = modDisabled?.Methods
+                .FirstOrDefault(m => m.Name == "BtnDownload_Loaded" && m.Body != null);
+            if (loaded == null)
+            {
+                return false;
+            }
+
+            IList<Instruction> instructions = loaded.Body!.Instructions;
+
+            // 折叠后的方法体以 ldc.i4.2 开头（原条件被完全删除）；
+            // 2.99.0.0 里条件求值在前，不能误改条件分支里的 Collapsed 常量。
+            if (instructions.Count < 2 || !IsLdcI4(instructions[0], 2))
+            {
+                return false;
+            }
+
+            // VB 可能先把枚举装箱成 Object 再存局部变量
+            int storeIdx = 1;
+            if (instructions[storeIdx].OpCode == OpCodes.Box)
+            {
+                storeIdx++;
+            }
+
+            if (storeIdx < instructions.Count && GetStlocIndex(instructions[storeIdx]) >= 0)
+            {
+                SetLdcI4(instructions[0], 0);
+                return true;
+            }
+
+            return false;
+        }
+
+        #endregion
+
         #region 工具方法
+
+        /// <summary>
+        /// 判断指令是否为「被折叠掉的条件求值残渣」：只把参数/常量压栈或丢弃，无副作用。
+        /// <para>
+        /// 例如 <c>If(Value = ResourceTypes.ModPack AndAlso False, …)</c> 会留下
+        /// <c>ldarg.1; ldc.i4.2; pop; pop</c>。这些指令成对出现，净栈变化为 0，可安全删除后重建判断。
+        /// </para>
+        /// </summary>
+        private static bool IsFoldedExpressionNoise(Instruction instruction)
+        {
+            if (instruction.OpCode == OpCodes.Nop
+                || instruction.OpCode == OpCodes.Pop
+                || instruction.OpCode == OpCodes.Ceq
+                || instruction.OpCode == OpCodes.Ldarg_1)
+            {
+                return true;
+            }
+
+            return instruction.OpCode == OpCodes.Ldc_I4_M1
+                || instruction.OpCode == OpCodes.Ldc_I4_0
+                || instruction.OpCode == OpCodes.Ldc_I4_1
+                || instruction.OpCode == OpCodes.Ldc_I4_2
+                || instruction.OpCode == OpCodes.Ldc_I4_3
+                || instruction.OpCode == OpCodes.Ldc_I4_4
+                || instruction.OpCode == OpCodes.Ldc_I4_5
+                || instruction.OpCode == OpCodes.Ldc_I4_6
+                || instruction.OpCode == OpCodes.Ldc_I4_7
+                || instruction.OpCode == OpCodes.Ldc_I4_8
+                || instruction.OpCode == OpCodes.Ldc_I4_S
+                || instruction.OpCode == OpCodes.Ldc_I4;
+        }
+
+        /// <summary>
+        /// 按完整类型名取顶层类型；不存在返回 <see langword="null"/>。
+        /// </summary>
+        private static TypeDef? FindType(ModuleDefMD module, string fullName)
+        {
+            return module.Types.FirstOrDefault(t => t.FullName == fullName);
+        }
+
+        /// <summary>
+        /// 查找第一条包含 <paramref name="text"/> 的 <c>ldstr</c> 指令索引；未找到返回 -1。
+        /// </summary>
+        private static int FindLdstrContains(IList<Instruction> instructions, string text)
+        {
+            for (int i = 0; i < instructions.Count; i++)
+            {
+                if (instructions[i].OpCode == OpCodes.Ldstr
+                    && (instructions[i].Operand as string)?.Contains(text) == true)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// 判断指令是否压入指定 int32 常量（含 <c>ldc.i4.0</c>~<c>ldc.i4.8</c>、<c>ldc.i4.s</c>、<c>ldc.i4</c>）。
+        /// </summary>
+        private static bool IsLdcI4(Instruction instruction, int value)
+        {
+            if (instruction.OpCode == OpCodes.Ldc_I4_M1)
+            {
+                return value == -1;
+            }
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_0) return value == 0;
+            if (instruction.OpCode == OpCodes.Ldc_I4_1) return value == 1;
+            if (instruction.OpCode == OpCodes.Ldc_I4_2) return value == 2;
+            if (instruction.OpCode == OpCodes.Ldc_I4_3) return value == 3;
+            if (instruction.OpCode == OpCodes.Ldc_I4_4) return value == 4;
+            if (instruction.OpCode == OpCodes.Ldc_I4_5) return value == 5;
+            if (instruction.OpCode == OpCodes.Ldc_I4_6) return value == 6;
+            if (instruction.OpCode == OpCodes.Ldc_I4_7) return value == 7;
+            if (instruction.OpCode == OpCodes.Ldc_I4_8) return value == 8;
+
+            if (instruction.OpCode == OpCodes.Ldc_I4_S && instruction.Operand is sbyte shortValue)
+            {
+                return shortValue == value;
+            }
+
+            if (instruction.OpCode == OpCodes.Ldc_I4 && instruction.Operand is int intValue)
+            {
+                return intValue == value;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 把 <c>ldc.i4</c> 指令改成立即数 <paramref name="value"/>（-1~8 仍使用短指令）。
+        /// </summary>
+        private static void SetLdcI4(Instruction instruction, int value)
+        {
+            switch (value)
+            {
+                case -1: instruction.OpCode = OpCodes.Ldc_I4_M1; break;
+                case 0: instruction.OpCode = OpCodes.Ldc_I4_0; break;
+                case 1: instruction.OpCode = OpCodes.Ldc_I4_1; break;
+                case 2: instruction.OpCode = OpCodes.Ldc_I4_2; break;
+                case 3: instruction.OpCode = OpCodes.Ldc_I4_3; break;
+                case 4: instruction.OpCode = OpCodes.Ldc_I4_4; break;
+                case 5: instruction.OpCode = OpCodes.Ldc_I4_5; break;
+                case 6: instruction.OpCode = OpCodes.Ldc_I4_6; break;
+                case 7: instruction.OpCode = OpCodes.Ldc_I4_7; break;
+                case 8: instruction.OpCode = OpCodes.Ldc_I4_8; break;
+                default:
+                    instruction.OpCode = OpCodes.Ldc_I4;
+                    instruction.Operand = value;
+                    return;
+            }
+
+            instruction.Operand = null;
+        }
+
+        /// <summary>
+        /// 若指令是 <c>stloc</c>，返回局部变量索引；否则返回 -1。
+        /// </summary>
+        private static int GetStlocIndex(Instruction instruction)
+        {
+            if (instruction.OpCode == OpCodes.Stloc_0) return 0;
+            if (instruction.OpCode == OpCodes.Stloc_1) return 1;
+            if (instruction.OpCode == OpCodes.Stloc_2) return 2;
+            if (instruction.OpCode == OpCodes.Stloc_3) return 3;
+
+            if ((instruction.OpCode == OpCodes.Stloc || instruction.OpCode == OpCodes.Stloc_S)
+                && instruction.Operand is Local local)
+            {
+                return local.Index;
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// 是否为无条件跳转（<c>br</c> / <c>br.s</c>）。
+        /// </summary>
+        private static bool IsUnconditionalBranch(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Br || instruction.OpCode == OpCodes.Br_S;
+        }
+
+        /// <summary>
+        /// 判断指令是否为 <c>callvirt ...::set_Visibility(...)</c>。
+        /// </summary>
+        private static bool IsSetVisibility(Instruction instruction)
+        {
+            return instruction.OpCode == OpCodes.Callvirt
+                && (instruction.Operand as IMethod)?.Name == "set_Visibility";
+        }
+
+        /// <summary>
+        /// 在指令序列中查找 <c>ldfld &lt;fieldName&gt;; ldc.i4 &lt;from&gt;; callvirt set_Visibility</c>，
+        /// 命中后把常量改为 <paramref name="to"/>。
+        /// </summary>
+        /// <returns>是否命中并修改。</returns>
+        private static bool TrySetFieldVisibility(
+            IList<Instruction> instructions,
+            string fieldName,
+            int from,
+            int to)
+        {
+            for (int i = 0; i + 2 < instructions.Count; i++)
+            {
+                if (instructions[i].OpCode != OpCodes.Ldfld
+                    || (instructions[i].Operand as IField)?.Name != fieldName
+                    || !IsLdcI4(instructions[i + 1], from)
+                    || !IsSetVisibility(instructions[i + 2]))
+                {
+                    continue;
+                }
+
+                SetLdcI4(instructions[i + 1], to);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 查找 <c>ldc.i4 &lt;from&gt;; stfld &lt;fieldName&gt;</c>，命中后把常量改为 <paramref name="to"/>。
+        /// </summary>
+        /// <returns>是否命中并修改。</returns>
+        private static bool TrySetFieldInt32(
+            IList<Instruction> instructions,
+            string fieldName,
+            int from,
+            int to)
+        {
+            for (int i = 1; i < instructions.Count; i++)
+            {
+                if (instructions[i].OpCode != OpCodes.Stfld
+                    || (instructions[i].Operand as IField)?.Name != fieldName
+                    || !IsLdcI4(instructions[i - 1], from))
+                {
+                    continue;
+                }
+
+                SetLdcI4(instructions[i - 1], to);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 查找 <c>ldfld &lt;fieldName&gt;; ldc.i4 &lt;from&gt;; callvirt &lt;setterName&gt;(bool)</c>，
+        /// 命中后把常量改为 <paramref name="to"/>。
+        /// </summary>
+        /// <returns>是否命中并修改。</returns>
+        private static bool TrySetFieldBoolean(
+            IList<Instruction> instructions,
+            string fieldName,
+            string setterName,
+            int from,
+            int to)
+        {
+            for (int i = 0; i + 2 < instructions.Count; i++)
+            {
+                if (instructions[i].OpCode != OpCodes.Ldfld
+                    || (instructions[i].Operand as IField)?.Name != fieldName
+                    || !IsLdcI4(instructions[i + 1], from))
+                {
+                    continue;
+                }
+
+                if (instructions[i + 2].OpCode != OpCodes.Callvirt
+                    || (instructions[i + 2].Operand as IMethod)?.Name != setterName)
+                {
+                    continue;
+                }
+
+                SetLdcI4(instructions[i + 1], to);
+                return true;
+            }
+
+            return false;
+        }
 
         /// <summary>
         /// 判断文件是否被其他进程独占（典型场景：PCL2 正在运行，占用了自己的 exe）。

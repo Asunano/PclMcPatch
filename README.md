@@ -10,6 +10,7 @@
 ## 功能特性
 
 - **一键补丁**：把 PCL2 的“原版游戏下载”从被禁用的假 Loader 恢复为真实的版本列表下载。
+- **覆盖 2.99.0.0 / 2.99.0.1**：除下载 Loader 外，2.99.0.1 新增隐藏的下载入口（下载页左侧入口、空列表下载按钮、启动页「下载游戏」、整合包安装按钮、版本设置「转到下载页面」）也一并恢复。
 - **启动器外壳**：把工具放到 PCL2 同目录后，双击工具即可「自动补丁 + 启动 PCL2」；官方更新后会在启动前自动重新注入。
 - **改名 / 换路径可用**：按程序**内部 IL 特征**定位，不依赖文件名。
 - **多版本兼容**：精确特征匹配为主，匹配不到时回退到宽松策略；两者都不匹配则安全跳过并提示，绝不乱改文件。
@@ -50,20 +51,28 @@
 
 上游把 `RestrictMcDownload` 设为 `Const True`，VB 编译器做了**常量折叠**，把 `Else` 分支（真实 `DlClientListLoader`）从 IL 中整段删除，只留下一个永远抛异常的“假 Loader”。因此无法“改个跳转”恢复，必须在 IL 层面把假 Loader 替换为真实字段。
 
-本工具基于 [dnlib](https://github.com/0xd4d/dnlib) 修改 IL，做两处补丁：
+本工具基于 [dnlib](https://github.com/0xd4d/dnlib) 修改 IL，共七处补丁：
 
 | 补丁 | 位置 | 修改 |
 |------|------|------|
 | A | `PCL.PageDownloadInstall.LoaderInit` | 把构造“假 LoaderTask（报错）”的指令段替换为 `ldsfld PCL.ModDownload::DlClientListLoader`，恢复原版游戏列表下载 |
 | B | `PCL.PageDownloadModify.LoadInstanceFinished` | 把 `CardMinecraft.Visibility = Collapsed` 改为 `Visible`，恢复版本修改页的“我的世界”卡片 |
+| C | `PCL.PageDownloadLeft..ctor` | 把 `ItemInstall` / `LabResource` 恢复为可见，并把默认子页面改回 `DownloadInstall`（仅 2.99.0.1 命中） |
+| D1 | `PCL.PageSelectRight.McInstanceListUI` | 版本列表为空时的「下载游戏」引导按钮恢复可见（仅 2.99.0.1 命中） |
+| D2 | `PCL.PageLaunchLeft.RefreshButtonsUI` | 无可用版本时 `CurrentState` 由“下载已禁用”(1) 改为“可下载”(2)（仅 2.99.0.1 命中） |
+| D3 | `PCL.PageResource.set_PageType` | 重新插入 `Value = ResourceTypes.ModPack` 判断，整合包类型下显示「安装已有整合包」（仅 2.99.0.1 命中） |
+| D4 | `PCL.PageInstanceModDisabled.BtnDownload_Loaded` | 把折叠后的 `Collapsed` 改为 `Visible`，恢复「转到下载页面」按钮（仅 2.99.0.1 命中） |
 
-> 整合包下载未被完全禁用（拖拽入口、带参 `ModpackInstall(String)` 完好），故不在补丁范围内。
+> 整合包的分发入口（拖拽、带参 `ModpackInstall(String)`）未被禁用，D3 只恢复资源页的手动安装按钮。
 
 ### 兼容性策略
 
-1. **精确策略**：在 `LoaderInit` 中按 `ldstr "关闭下载"` → `newobj LoaderTask\`2<>` 的指令段定位并替换。
-2. **宽松回退**：若精确特征缺失，则把方法内**唯一**的 `LoaderTask\`2<>` 构造视为待替换点。
-3. **不匹配**：两者都失败则跳过、不改文件，并提示反馈版本号。
+1. **精确策略**：补丁 A 按 `ldstr "关闭下载"` → `newobj LoaderTask\`2<>` 的指令段定位并替换；B–D4 按「类型名 + 方法名 + 字段名 + 紧跟常量 + setter 名」定位。
+2. **宽松回退**：若 A 的精确特征缺失，则把方法内**唯一**的 `LoaderTask\`2<>` 构造视为待替换点。
+3. **版本区分**：C–D4 只在 2.99.0.1 的折叠形态下命中；2.99.0.0 的同名方法仍是带分支的正常逻辑，不会被误改（已用两个版本的模拟程序集回归）。
+4. **不匹配**：找不到特征则跳过、不改文件，并提示反馈版本号。
+
+> D2/D4 在 2.99.0.0 原本还会遵循「隐藏下载页面」设置；本工具直接恢复为可下载/可见，与该设置无关。
 
 ---
 
